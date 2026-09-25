@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const FALLBACK_ASSETS = [
   { id: 'AS-00123', name: 'Dell Monitor 27"', category: 'Electronics', type: 'Monitor', status: 'Available', location: 'Floor 2 - Dev Team', image: '🖥️', assignedTo: '', purchaseDate: '2024-06-12', warrantyTill: '2027-06-12', notes: 'High-resolution monitor for development workstations.' },
@@ -53,12 +53,16 @@ const EMPTY_ASSET_FORM = {
 
 function App() {
   const [assets, setAssets] = useState(FALLBACK_ASSETS);
-  const [nav, setNav] = useState('Assets');
+  const [nav, setNav] = useState('Home');
   const [selectedId, setSelectedId] = useState('AS-00124');
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [viewMode, setViewMode] = useState('Floor View');
   const [detailTab, setDetailTab] = useState('Details');
+  const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(true);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const dragStateRef = useRef({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 });
   const [toast, setToast] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -123,14 +127,56 @@ function App() {
   }, [assets, categoryFilter, searchTerm]);
 
   const selectedAsset = filteredAssets.find((asset) => asset.id === selectedId) || assets.find((asset) => asset.id === selectedId) || FALLBACK_ASSETS[1];
+  const isHomeView = nav === 'Home';
 
   const updateAssetState = (assetId, updates) => {
     setAssets((current) => current.map((asset) => (asset.id === assetId ? { ...asset, ...updates } : asset)));
   };
 
+  const selectAsset = (assetId) => {
+    setSelectedId(assetId);
+    setIsDetailPanelOpen(true);
+  };
+
   const showToast = (message) => {
     setToast(message);
     window.setTimeout(() => setToast(''), 2200);
+  };
+
+  const clampZoom = (value) => Math.min(1.8, Math.max(0.6, value));
+
+  const handleZoom = (delta) => {
+    setZoomLevel((current) => clampZoom(current + delta));
+  };
+
+  const handlePanStep = (dx, dy) => {
+    setPan((current) => ({ x: current.x + dx, y: current.y + dy }));
+  };
+
+  const handlePlannerPointerDown = (event) => {
+    if (event.button !== 0) return;
+    dragStateRef.current = {
+      active: true,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: pan.x,
+      originY: pan.y,
+    };
+    event.preventDefault();
+  };
+
+  const handlePlannerPointerMove = (event) => {
+    if (!dragStateRef.current.active) return;
+    const deltaX = (event.clientX - dragStateRef.current.startX) / zoomLevel;
+    const deltaY = (event.clientY - dragStateRef.current.startY) / zoomLevel;
+    setPan({
+      x: dragStateRef.current.originX + deltaX,
+      y: dragStateRef.current.originY + deltaY,
+    });
+  };
+
+  const handlePlannerPointerUp = () => {
+    dragStateRef.current.active = false;
   };
 
   const performAction = async (endpoint, payload, successMessage) => {
@@ -396,61 +442,63 @@ function App() {
         </header>
 
         <section className="asset-section">
-          <div className="asset-list-panel">
-            <div className="panel-header">
-              <h2>Assets</h2>
-              <div className="panel-header-actions">
-                <button className="primary-action" type="button" onClick={() => { setAssetFormMode('create'); setAssetForm({ ...EMPTY_ASSET_FORM, asset_id: `AS-${Math.floor(Math.random() * 9000 + 1000)}` }); setShowAssetForm(true); }}>New Asset</button>
+          {!isHomeView && (
+            <div className="asset-list-panel">
+              <div className="panel-header">
+                <h2>Assets</h2>
+                <div className="panel-header-actions">
+                  <button className="primary-action" type="button" onClick={() => { setAssetFormMode('create'); setAssetForm({ ...EMPTY_ASSET_FORM, asset_id: `AS-${Math.floor(Math.random() * 9000 + 1000)}` }); setShowAssetForm(true); }}>New Asset</button>
+                </div>
+              </div>
+
+              <div className="filter-row">
+                {FILTER_ITEMS.map((filter) => (
+                  <button
+                    key={filter}
+                    className={`chip ${categoryFilter === filter ? 'active' : ''}`}
+                    onClick={() => setCategoryFilter(filter)}
+                  >
+                    {filter} ({filter === 'All' ? assets.length : assets.filter((asset) => asset.category === filter).length})
+                  </button>
+                ))}
+              </div>
+
+              <input
+                className="search-input"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search by asset name, tag, or ID..."
+              />
+
+              <div className="asset-card-list">
+                {filteredAssets.length ? filteredAssets.map((asset) => (
+                  <button
+                    key={asset.id}
+                    className={`asset-row ${selectedAsset?.id === asset.id ? 'selected' : ''}`}
+                    onClick={() => selectAsset(asset.id)}
+                  >
+                    <div className="asset-icon">{asset.image}</div>
+                    <div className="asset-copy">
+                      <div className="asset-title-row">
+                        <strong>{asset.id}</strong>
+                      </div>
+                      <div className="asset-name">{asset.name}</div>
+                      <div className="asset-meta">
+                        <span className={`status-dot ${asset.status === 'In Use' ? 'in-use' : 'available'}`}></span>
+                        {asset.status}
+                      </div>
+                      <div className="asset-location">{asset.location}</div>
+                    </div>
+                    <span className="chevron">›</span>
+                  </button>
+                )) : (
+                  <div className="empty-state">No assets match your search.</div>
+                )}
               </div>
             </div>
+          )}
 
-            <div className="filter-row">
-              {FILTER_ITEMS.map((filter) => (
-                <button
-                  key={filter}
-                  className={`chip ${categoryFilter === filter ? 'active' : ''}`}
-                  onClick={() => setCategoryFilter(filter)}
-                >
-                  {filter} ({filter === 'All' ? assets.length : assets.filter((asset) => asset.category === filter).length})
-                </button>
-              ))}
-            </div>
-
-            <input
-              className="search-input"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search by asset name, tag, or ID..."
-            />
-
-            <div className="asset-card-list">
-              {filteredAssets.length ? filteredAssets.map((asset) => (
-                <button
-                  key={asset.id}
-                  className={`asset-row ${selectedAsset?.id === asset.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedId(asset.id)}
-                >
-                  <div className="asset-icon">{asset.image}</div>
-                  <div className="asset-copy">
-                    <div className="asset-title-row">
-                      <strong>{asset.id}</strong>
-                    </div>
-                    <div className="asset-name">{asset.name}</div>
-                    <div className="asset-meta">
-                      <span className={`status-dot ${asset.status === 'In Use' ? 'in-use' : 'available'}`}></span>
-                      {asset.status}
-                    </div>
-                    <div className="asset-location">{asset.location}</div>
-                  </div>
-                  <span className="chevron">›</span>
-                </button>
-              )) : (
-                <div className="empty-state">No assets match your search.</div>
-              )}
-            </div>
-          </div>
-
-          <div className="floor-panel">
+          <div className={`floor-panel ${isHomeView ? 'home-floor-panel' : ''}`}>
             <div className="toolbar">
               <div className="toolbar-group left">
                 {['Floor View', 'List View'].map((mode) => (
@@ -464,126 +512,151 @@ function App() {
                 ))}
               </div>
               <div className="toolbar-group right">
-                <button className="small-btn" type="button" aria-label="Zoom out">−</button>
-                <span className="zoom-level">100%</span>
-                <button className="small-btn" type="button" aria-label="Zoom in">＋</button>
+                <button className="small-btn" type="button" aria-label="Pan left" onClick={() => handlePanStep(-40, 0)}>←</button>
+                <button className="small-btn" type="button" aria-label="Pan right" onClick={() => handlePanStep(40, 0)}>→</button>
+                <button className="small-btn" type="button" aria-label="Zoom out" onClick={() => handleZoom(-0.12)}>−</button>
+                <span className="zoom-level">{Math.round(zoomLevel * 100)}%</span>
+                <button className="small-btn" type="button" aria-label="Zoom in" onClick={() => handleZoom(0.12)}>＋</button>
+                <button className="small-btn" type="button" aria-label="Reset view" onClick={() => { setZoomLevel(1); setPan({ x: 0, y: 0 }); }}>⌂</button>
               </div>
             </div>
 
-            <div className="floor-map">
-              <div className="map-outer">
-                {ROOMS.map((room) => (
-                  <div
-                    key={room.name}
-                    className="room-label"
-                    style={{ left: `${room.x}px`, top: `${room.y}px`, width: `${room.w}px`, height: `${room.h}px` }}
-                  >
-                    {room.name}
-                  </div>
-                ))}
-
-                {DESKS.map((desk) => {
-                  const match = assets.find((asset) => asset.id === desk.id);
-                  const isSelected = selectedAsset?.id === desk.id;
-                  return (
-                    <button
-                      key={`${desk.x}-${desk.y}`}
-                      type="button"
-                      className={`desk ${isSelected ? 'active' : ''}`}
-                      style={{ left: `${desk.x}px`, top: `${desk.y}px`, width: `${desk.w}px`, height: `${desk.h}px` }}
-                      onClick={() => setSelectedId(desk.id)}
-                      title={match ? match.name : 'Asset'}
+            <div
+              className="floor-map"
+              onWheel={(event) => {
+                event.preventDefault();
+                handleZoom(event.deltaY < 0 ? 0.12 : -0.12);
+              }}
+            >
+              <div
+                className="map-outer"
+                onMouseDown={handlePlannerPointerDown}
+                onMouseMove={handlePlannerPointerMove}
+                onMouseUp={handlePlannerPointerUp}
+                onMouseLeave={handlePlannerPointerUp}
+              >
+                <div
+                  className="planner-stage"
+                  style={{
+                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomLevel})`,
+                    transformOrigin: '0 0',
+                  }}
+                >
+                  {ROOMS.map((room) => (
+                    <div
+                      key={room.name}
+                      className="room-label"
+                      style={{ left: `${room.x}px`, top: `${room.y}px`, width: `${room.w}px`, height: `${room.h}px` }}
                     >
-                      <span className="desk-top"></span>
-                      <span className="desk-leg left"></span>
-                      <span className="desk-leg right"></span>
-                      <span className="chair"></span>
-                    </button>
-                  );
-                })}
+                      {room.name}
+                    </div>
+                  ))}
 
-                <div className="map-marker selected-marker" style={{ left: `${selectedAsset ? 420 : 420}px`, top: `${selectedAsset ? 240 : 240}px` }}></div>
+                  {DESKS.map((desk) => {
+                    const match = assets.find((asset) => asset.id === desk.id);
+                    const isSelected = selectedAsset?.id === desk.id;
+                    return (
+                      <button
+                        key={`${desk.x}-${desk.y}`}
+                        type="button"
+                        className={`desk ${isSelected ? 'active' : ''}`}
+                        style={{ left: `${desk.x}px`, top: `${desk.y}px`, width: `${desk.w}px`, height: `${desk.h}px` }}
+                        onClick={() => selectAsset(desk.id)}
+                        title={match ? match.name : 'Asset'}
+                      >
+                        <span className="desk-top"></span>
+                        <span className="desk-leg left"></span>
+                        <span className="desk-leg right"></span>
+                        <span className="chair"></span>
+                      </button>
+                    );
+                  })}
+
+                  <div className="map-marker selected-marker" style={{ left: `${selectedAsset ? 420 : 420}px`, top: `${selectedAsset ? 240 : 240}px` }}></div>
+                </div>
               </div>
             </div>
           </div>
         </section>
       </main>
 
-      <aside className="details-panel">
-        <div className="panel-title-row">
-          <h3>Asset Details</h3>
-          <button className="close-btn" type="button" aria-label="Close">×</button>
-        </div>
-
-        <div className="details-asset-card">
-          <div className="mini-asset-icon">{selectedAsset.image}</div>
-          <div className="mini-asset-name">{selectedAsset.id}</div>
-          <div className="mini-asset-status">{selectedAsset.status}</div>
-        </div>
-
-        <div className="details-tabs">
-          {DETAIL_TABS.map((tab) => (
-            <button
-              key={tab}
-              className={`tab ${detailTab === tab ? 'active' : ''}`}
-              onClick={() => setDetailTab(tab)}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {detailTab === 'Details' && (
-          <div className="details-table">
-            <div className="detail-row"><span>Asset ID</span><strong>{selectedAsset.id}</strong></div>
-            <div className="detail-row"><span>Name</span><strong>{selectedAsset.name}</strong></div>
-            <div className="detail-row"><span>Category</span><strong>{selectedAsset.category}</strong></div>
-            <div className="detail-row"><span>Type</span><strong>{selectedAsset.type}</strong></div>
-            <div className="detail-row"><span>Location</span><strong>{selectedAsset.location}</strong></div>
-            <div className="detail-row"><span>Assigned To</span><strong>{selectedAsset.assignedTo || 'Unassigned'}</strong></div>
-            <div className="detail-row"><span>Purchase Date</span><strong>{selectedAsset.purchaseDate}</strong></div>
-            <div className="detail-row"><span>Warranty Till</span><strong>{selectedAsset.warrantyTill}</strong></div>
+      {!isHomeView && isDetailPanelOpen && (
+        <aside className="details-panel">
+          <div className="panel-title-row">
+            <h3>Asset Details</h3>
+            <button className="close-btn" type="button" aria-label="Close" onClick={() => setIsDetailPanelOpen(false)}>×</button>
           </div>
-        )}
 
-        {detailTab === 'History' && (
-          <div className="details-table">
-            {history.map((item) => (
-              <div key={item.title} className="detail-row">
-                <span>{item.title}</span>
-                <strong>{item.value}</strong>
-              </div>
+          <div className="details-asset-card">
+            <div className="mini-asset-icon">{selectedAsset.image}</div>
+            <div className="mini-asset-name">{selectedAsset.id}</div>
+            <div className="mini-asset-status">{selectedAsset.status}</div>
+          </div>
+
+          <div className="details-tabs">
+            {DETAIL_TABS.map((tab) => (
+              <button
+                key={tab}
+                className={`tab ${detailTab === tab ? 'active' : ''}`}
+                onClick={() => setDetailTab(tab)}
+              >
+                {tab}
+              </button>
             ))}
           </div>
-        )}
 
-        {detailTab === 'Related' && (
-          <div className="details-table">
-            {related.map((item) => (
-              <div key={item} className="detail-row">
-                <span>Related</span>
-                <strong>{item}</strong>
-              </div>
-            ))}
+          {detailTab === 'Details' && (
+            <div className="details-table">
+              <div className="detail-row"><span>Asset ID</span><strong>{selectedAsset.id}</strong></div>
+              <div className="detail-row"><span>Name</span><strong>{selectedAsset.name}</strong></div>
+              <div className="detail-row"><span>Category</span><strong>{selectedAsset.category}</strong></div>
+              <div className="detail-row"><span>Type</span><strong>{selectedAsset.type}</strong></div>
+              <div className="detail-row"><span>Location</span><strong>{selectedAsset.location}</strong></div>
+              <div className="detail-row"><span>Assigned To</span><strong>{selectedAsset.assignedTo || 'Unassigned'}</strong></div>
+              <div className="detail-row"><span>Purchase Date</span><strong>{selectedAsset.purchaseDate}</strong></div>
+              <div className="detail-row"><span>Warranty Till</span><strong>{selectedAsset.warrantyTill}</strong></div>
+            </div>
+          )}
+
+          {detailTab === 'History' && (
+            <div className="details-table">
+              {history.map((item) => (
+                <div key={item.title} className="detail-row">
+                  <span>{item.title}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {detailTab === 'Related' && (
+            <div className="details-table">
+              {related.map((item) => (
+                <div key={item} className="detail-row">
+                  <span>Related</span>
+                  <strong>{item}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="quick-actions">
+            <button className="primary-action" type="button" onClick={handleAssign}>Assign</button>
+            <button className="secondary-action" type="button" onClick={handleMove}>Move</button>
+            <button className="secondary-action" type="button" onClick={handleReportIssue}>Report Issue</button>
           </div>
-        )}
 
-        <div className="quick-actions">
-          <button className="primary-action" type="button" onClick={handleAssign}>Assign</button>
-          <button className="secondary-action" type="button" onClick={handleMove}>Move</button>
-          <button className="secondary-action" type="button" onClick={handleReportIssue}>Report Issue</button>
-        </div>
+          <div className="admin-actions">
+            <button className="secondary-action" type="button" onClick={() => { setAssetFormMode('edit'); setAssetForm({ ...selectedAsset, asset_id: selectedAsset.id, asset_type: selectedAsset.type, assigned_to: selectedAsset.assignedTo || '', purchase_date: selectedAsset.purchaseDate, warranty_till: selectedAsset.warrantyTill }); setShowAssetForm(true); }}>Edit Asset</button>
+            <button className="secondary-action danger" type="button" onClick={handleDeleteAsset}>Delete Asset</button>
+          </div>
 
-        <div className="admin-actions">
-          <button className="secondary-action" type="button" onClick={() => { setAssetFormMode('edit'); setAssetForm({ ...selectedAsset, asset_id: selectedAsset.id, asset_type: selectedAsset.type, assigned_to: selectedAsset.assignedTo || '', purchase_date: selectedAsset.purchaseDate, warranty_till: selectedAsset.warrantyTill }); setShowAssetForm(true); }}>Edit Asset</button>
-          <button className="secondary-action danger" type="button" onClick={handleDeleteAsset}>Delete Asset</button>
-        </div>
-
-        <div className="notes-box">
-          <h4>Notes</h4>
-          <p>{selectedAsset.notes}</p>
-        </div>
-      </aside>
+          <div className="notes-box">
+            <h4>Notes</h4>
+            <p>{selectedAsset.notes}</p>
+          </div>
+        </aside>
+      )}
 
       {showAssetForm && (
         <div className="asset-modal-backdrop" onClick={() => setShowAssetForm(false)}>
